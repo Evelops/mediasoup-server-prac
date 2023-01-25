@@ -12,6 +12,9 @@ let device;
 let rtpCapabilities;
 let producerTransport;
 let producer;
+let consumerTransport;
+let consumer;
+
 
 let params ={
    //mediasoup params 
@@ -152,13 +155,47 @@ const connectSendTransport = async () => {
       return;  
     }
 
-    
     console.log(params);
+    // cousumerTransport 생성.
+    consumerTransport = device.createRecvTransport(params);
+
+    consumerTransport.on('connect', async({dtlsParameters}, callback, errback)=>{
+      try{
+        await socket.emit('transport-recv-connect',{
+          // transportId: consumerTransport.id,
+          dtlsParameters,
+        });
+        callback();
+      }catch(error){
+        errback(error);
+      }
+    });
   });
  }
 
+ const connectRecvTransport = async () => {
+  await socket.emit('consume',{
+    rtpCapabilities: device.rtpCapabilities,
+  }, async ({ params}) => {
+    if(params.error){
+      console.log('Cant Consume');
+      return;
+    }
+    console.log(params);
+    consumer = await consumerTransport.consume({
+      id: params.id,
+      producerId: params.producerId,
+      kind: params.kind,
+      rtpParameters: params.rtpParameters
+    });
+    const {track} = consumer;
 
+    remoteVideo.srcObject = new MediaStream([track]);
 
+    socket.emit('consumer-resume');
+
+  });
+ }
 
 //send Peer RtpCapabilities with mediasoup Server
 const getRtpCapabilities = () => {
@@ -178,3 +215,4 @@ btnDevice.addEventListener('click',createDevice);
 btnCreateSendTransport.addEventListener('click',createSendTransport);
 btnConnectSendTransport.addEventListener('click',connectSendTransport);
 btnRecvSendTransport.addEventListener('click',createRecvTransport);
+btnConnectRecvTransport.addEventListener('click',connectRecvTransport);

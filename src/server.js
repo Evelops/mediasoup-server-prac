@@ -134,6 +134,49 @@ httpsServer.listen(3000,()=>{
             id:producer.id
          });
     });
+    socket.on('transport-recv-connect', async({dtlsParameters}) => {
+        console.log(`DTLS PARAMS : ${dtlsParameters}`);
+        await consumerTransport.connect({dtlsParameters});
+    }); 
+    socket.on('consume',async ({ rtpCapabilities },callback)=>{
+        try{
+            if(router.canConsume({
+                producerId: producer.id, 
+                rtpCapabilities
+            })){
+                consumer = await consumerTransport.consume({
+                    producerId: producer.id, 
+                    rtpCapabilities,
+                    paused: true,
+                });
+                consumer.on('transportclose', () => {
+                    console.log('transport close from consumer');
+                });
+                consumer.on('producerclose', () => {
+                    console.log('producer of consumer closed');
+                });
+
+                const params = {
+                    id:consumer.id,
+                    producerId:producer.id,
+                    kind:consumer.kind,
+                    rtpParameters:consumer.rtpParameters,
+                }
+                callback({params});
+            }
+        }catch(error){
+            console.log(error.message); 
+            callback({
+                params: {
+                    error: error
+                }
+            })
+        }
+    });
+    socket.on('consumer-resume', async () => {
+        console.log('consumer resume'); 
+        await consumer.resume();
+    })
  });
 
 /** webRTC transport를 처리하는 로직.*/
@@ -142,7 +185,8 @@ const createWebRtcTransport = async (callback) => {
         const webRtcTransport_options = {
             listenIps: [
                 {
-                    ip:'127.0.0.1'
+                    ip:'0.0.0.0',
+                    announcedIp:'127.0.0.1',
                 }
             ],
             enableUdp:true,
