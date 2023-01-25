@@ -3,3 +3,7 @@ node_modules
 package-lock.json
 
 ssl
+
+/public/test.js
+
+/src/testServer.js
