@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import Socket from "socket.io";
 import * as mediasoup from "mediasoup";
+import { Producer } from "mediasoup-client/lib/Producer";
 
 
 const app = express();
@@ -42,6 +43,10 @@ httpsServer.listen(3000,()=>{
  let worker;
 // worker로 부터 생성되는 router 정의, mediasoup의 router에서 socket.io를 사용한 signaling 과정을 중계.
  let router;
+ let producerTransport; 
+ let consumerTransport;
+ let producer;
+ let consumer;
 
  // worker를 호출하는 함수 정의. 
  const createWorker = async () => {
@@ -59,7 +64,6 @@ httpsServer.listen(3000,()=>{
     });
     return worker;
  }
-
 
  worker = createWorker();
  
@@ -93,5 +97,87 @@ httpsServer.listen(3000,()=>{
     });
 
     router = await worker.createRouter({mediaCodecs});
+    
+    // peer에서 전송한 rtpCapabilities info 획득.
+    socket.on('getRtpCapabilities',(callback) => {
+        const rtpCapabilities = router.rtpCapabilities;
+        console.log(`RTP Capabilities: ${rtpCapabilities}`);
+        callback({rtpCapabilities});
+    });
+
+    socket.on('createWebRtcTransport', async({sender}, callback)=> {
+        console.log(sender);
+        if(sender){
+            producerTransport = await createWebRtcTransport(callback);
+        }else{
+            consumerTransport = await createWebRtcTransport(callback);
+        }
+    });
+    socket.on('transport-connect', async({dtlsParameters})=> {
+        console.log('DTLs Params : ',{dtlsParameters});
+        await producerTransport.connect({ dtlsParameters });
+    });
+
+    socket.on('transport-produce', async ({kind, rtpParameters, appData},callback)=>{
+         producer = await producerTransport.produce({
+            kind,
+            rtpParameters,
+         });
+
+         console.log('Producer ID:',producer.id, producer.kind);
+
+         producer.on('transportclose', () => {
+            console.log('transport for this producer clodsed');
+            producer.close();
+         });
+         callback({
+            id:producer.id
+         });
+    });
  });
 
+/** webRTC transport를 처리하는 로직.*/
+const createWebRtcTransport = async (callback) => {
+    try{
+        const webRtcTransport_options = {
+            listenIps: [
+                {
+                    ip:'127.0.0.1'
+                }
+            ],
+            enableUdp:true,
+            enableTcp:true,
+            preferUdp:true,
+        }
+        let transport = await router.createWebRtcTransport(webRtcTransport_options);
+        console.log(`transportId : ${transport.id}`);
+
+        transport.on('dtlsstatechange',dtlsState =>{
+            if(dtlsState === 'closed'){
+                transport.close(); 
+            }
+        });
+        transport.on('close',()=> {
+            console.log('transport closed');
+        });
+
+        callback({
+            params:{
+                id: transport.id,
+                iceParameters: transport.iceParameters,
+                iceCandidates: transport.iceCandidates,
+                dtlsParameters: transport.dtlsParameters,
+            }
+        });
+        return transport;
+         
+    }catch(error){
+        console.log(error);
+        callback({
+            params: {
+                error:error
+            }
+        })
+
+    }
+}
